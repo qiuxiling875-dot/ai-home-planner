@@ -1,16 +1,15 @@
 // ============================================================
-// AI渲染API集成模块 — 真实API调用版（非注释版）
+// AI渲染API集成模块 — 前端调用层
 //
 // 调用链路：
 // 前端 batchRenderRooms() → fetch("/api/render") → route.ts → Decor8 AI
 //
-// 【排查清单】如果渲染图仍然不显示：
-// 1. Vercel环境变量 DECOR8_API_KEY 是否已设置？
-// 2. 设置后是否点了 Redeploy？（必须重新部署才生效）
-// 3. F12 → Network → 筛选 /api/render → 看Response内容
-// 4. Vercel Dashboard → Deployments → 点最新部署 → Logs
-// 5. Decor8 API的真实endpoint和参数格式是否正确？
-//    去 https://www.decor8.ai/api 查看最新文档
+// 本文件只负责：
+// 1. 把用户上传的照片逐张发送给 /api/render
+// 2. 收集返回的渲染图URL
+// 3. 汇总成 BatchRenderResult
+//
+// 真正的API调用逻辑在 app/api/render/route.ts 中
 // ============================================================
 
 import { STYLE_RENDER_DATA } from "./constants";
@@ -46,7 +45,7 @@ export interface BatchRenderResult {
 }
 
 // =====================
-// 风格映射
+// 风格映射（传给后端route.ts）
 // =====================
 
 const STYLE_TO_API: Record<string, string> = {
@@ -61,7 +60,7 @@ const STYLE_TO_API: Record<string, string> = {
 };
 
 // =====================
-// 核心函数：批量渲染整套房子
+// 核心函数
 // =====================
 
 export async function batchRenderRooms(
@@ -78,44 +77,29 @@ export async function batchRenderRooms(
     onProgress?.(pct, room);
   };
 
-  // ============================================================
-  // 步骤1：生成统一风格种子（保证全屋一致性）
-  // ============================================================
+  // 步骤1：生成风格种子
   reportProgress("整体空间与风格分析中...");
-
   let styleSeed = "";
 
   try {
-    const seedResponse = await fetch("/api/render", {
+    const seedRes = await fetch("/api/render", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "generate_style_seed",
         style: STYLE_TO_API[style] || "scandinavian",
-        budget,
-        area,
       }),
     });
-
-    if (seedResponse.ok) {
-      const seedData = await seedResponse.json();
-      styleSeed = seedData.styleSeed || "";
-      console.log("[AI-API] 风格种子生成成功:", styleSeed);
-    } else {
-      console.warn("[AI-API] 风格种子生成失败, status:", seedResponse.status);
+    if (seedRes.ok) {
+      const data = await seedRes.json();
+      styleSeed = data.styleSeed || "";
     }
-  } catch (error) {
-    console.warn("[AI-API] 风格种子请求异常:", error);
+  } catch (e) {
+    console.warn("[ai-api] 风格种子失败:", e);
   }
+  if (!styleSeed) styleSeed = `local_${style}_${Date.now()}`;
 
-  // 如果种子生成失败，用本地fallback
-  if (!styleSeed) {
-    styleSeed = `local_seed_${style}_${Date.now()}`;
-  }
-
-  // ============================================================
-  // 步骤2：逐个房间调用 /api/render 进行AI渲染
-  // ============================================================
+  // 步骤2：逐个房间渲染
   const rooms: RoomRenderResult[] = [];
 
   for (let i = 0; i < images.length; i++) {
@@ -127,55 +111,47 @@ export async function batchRenderRooms(
     let materials: string[] = [];
 
     try {
-      const formData = new FormData();
-      formData.append("image", images[i]);
-      formData.append("room_type", roomName);
-      formData.append("style", STYLE_TO_API[style] || "scandinavian");
-      formData.append("style_seed", styleSeed);
-      formData.append("plan_id", planId);
-      formData.append("budget", budget);
-      formData.append("area", area);
+      const fd = new FormData();
+      fd.append("image", images[i]);
+      fd.append("room_type", roomName);
+      fd.append("style", STYLE_TO_API[style] || "scandinavian");
+      fd.append("style_seed", styleSeed);
+      fd.append("plan_id", planId);
 
-      console.log(`[AI-API] 开始渲染 ${roomName} (${i + 1}/${images.length})`);
+      console.log(`[ai-api] 渲染 ${roomName} (${i + 1}/${images.length})`);
 
-      const response = await fetch("/api/render", {
-        method: "POST",
-        body: formData,
-      });
+      const res = await fetch("/api/render", { method: "POST", body: fd });
 
-      if (response.ok) {
-        const data = await response.json();
+      if (res.ok) {
+        const data = await res.json();
         renderedImageUrl = data.rendered_image_url || "";
         description = data.design_description || "";
         materials = data.recommended_materials || [];
 
-        console.log(`[AI-API] ${roomName} 完成:`, {
-          hasImage: !!renderedImageUrl,
-          urlPreview: renderedImageUrl.substring(0, 80),
+        // 调试：打印API返回的所有字段
+        console.log(`[ai-api] ${roomName} 返回:`, {
+          hasUrl: !!renderedImageUrl,
+          keys: Object.keys(data),
+          error: data._error || "无",
         });
 
-        // 【关键调试】如果API返回了但URL为空，说明API参数或endpoint有问题
-        if (!renderedImageUrl) {
-          console.warn(
-            `[AI-API] ⚠️ ${roomName}: API返回成功但 rendered_image_url 为空!`,
-            "完整返回数据:", JSON.stringify(data)
-          );
+        if (data._error) {
+          console.warn(`[ai-api] ${roomName} API错误:`, data._error);
         }
       } else {
-        const errorBody = await response.text().catch(() => "无法读取错误内容");
-        console.error(`[AI-API] ${roomName} 失败:`, response.status, errorBody);
+        console.error(`[ai-api] ${roomName} HTTP错误:`, res.status);
       }
-    } catch (error) {
-      console.error(`[AI-API] ${roomName} 异常:`, error);
+    } catch (err) {
+      console.error(`[ai-api] ${roomName} 异常:`, err);
     }
 
-    // 默认值兜底
-    const styleData = STYLE_RENDER_DATA[style] || STYLE_RENDER_DATA.nordic;
+    // 兜底默认值
+    const sd = STYLE_RENDER_DATA[style] || STYLE_RENDER_DATA.nordic;
     if (!description) {
-      description = `${roomName}采用${style}风格，与全屋保持统一的色调和材质体系。`;
+      description = `${roomName}采用统一风格设计`;
     }
     if (materials.length === 0) {
-      materials = styleData.material.split(" + ");
+      materials = sd.material.split(" + ");
     }
 
     rooms.push({
@@ -188,21 +164,19 @@ export async function batchRenderRooms(
     });
   }
 
-  // ============================================================
   // 步骤3：一致性校验
-  // ============================================================
   reportProgress("全屋风格一致性校验中...");
   await new Promise((r) => setTimeout(r, 300));
 
-  const styleData = STYLE_RENDER_DATA[style] || STYLE_RENDER_DATA.nordic;
+  const sd = STYLE_RENDER_DATA[style] || STYLE_RENDER_DATA.nordic;
   onProgress?.(100, "完成！");
 
   return {
     rooms,
     styleSeed,
     consistencyScore: 97.5 + Math.random() * 2,
-    overallPalette: styleData.palette,
-    overallMaterial: styleData.material,
+    overallPalette: sd.palette,
+    overallMaterial: sd.material,
   };
 }
 
@@ -214,7 +188,7 @@ export function generateXHSNote(
   rooms: string[],
   budget: string
 ): string {
-  const cleanStyle = styleName.replace(/[^\u4e00-\u9fa5a-zA-Z]/g, "");
+  const clean = styleName.replace(/[^\u4e00-\u9fa5a-zA-Z]/g, "");
   return `🏠 毛胚房大改造 | ${styleName}全屋统一设计
 
 💰 ${budget}预算！年轻人第一套房也能住出高级感
@@ -225,10 +199,5 @@ export function generateXHSNote(
 
 🪄 秘密武器：AI帮我做的全屋规划，3分钟出图
 
-💡 小tips：
-- 整套房子一定要先定好统一的色调再开始买家具
-- 灯光色温全屋统一很重要（推荐3000-3500K暖白光）
-- 同一种地板通铺全屋，空间感翻倍
-
-#毛胚房改造 #装修灵感 #${cleanStyle} #年轻人的第一套房 #AI装修设计 #全屋统一风格 #装修日记`;
+#毛胚房改造 #装修灵感 #${clean} #年轻人的第一套房 #AI装修设计`;
 }
