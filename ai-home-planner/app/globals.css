@@ -1,0 +1,111 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== Google Fonts 引入 ===== */
+@import url("https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700;900&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap");
+
+/* ===== shadcn/ui CSS变量（浅色装修风主题） ===== */
+@layer base {
+  :root {
+    --background: 40 33% 98%;
+    --foreground: 28 10% 20%;
+    --card: 40 33% 97%;
+    --card-foreground: 28 10% 20%;
+    --primary: 33 88% 44%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 33 30% 80%;
+    --secondary-foreground: 28 10% 20%;
+    --muted: 30 20% 93%;
+    --muted-foreground: 28 8% 50%;
+    --accent: 33 50% 60%;
+    --accent-foreground: 28 10% 10%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 30 15% 88%;
+    --input: 30 15% 88%;
+    --ring: 33 88% 44%;
+    --radius: 0.75rem;
+  }
+}
+
+/* ===== 基础样式 ===== */
+html {
+  scroll-behavior: smooth;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: "Noto Sans SC", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: linear-gradient(180deg, #faf8f5 0%, #f5f0eb 50%, #ede5db 100%);
+  min-height: 100vh;
+}
+
+/* ===== 自定义滚动条（WebKit内核） ===== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f5f0eb;
+}
+::-webkit-scrollbar-thumb {
+  background: #d4c5b2;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #c9a96e;
+}
+
+/* ===== 自定义动画关键帧 ===== */
+@keyframes float-particle-0 {
+  0%, 100% { transform: translateY(0px) rotate(0deg); opacity: 0.15; }
+  50% { transform: translateY(-30px) rotate(5deg); opacity: 0.25; }
+}
+@keyframes float-particle-1 {
+  0%, 100% { transform: translateY(0) translateX(0); opacity: 0.12; }
+  50% { transform: translateY(-20px) translateX(15px); opacity: 0.22; }
+}
+@keyframes float-particle-2 {
+  0%, 100% { transform: translateY(0) scale(1); opacity: 0.1; }
+  50% { transform: translateY(-25px) scale(1.1); opacity: 0.2; }
+}
+
+/* ===== 工具类 ===== */
+@layer utilities {
+  .shimmer-bg {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.4),
+      transparent
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2.5s linear infinite;
+  }
+
+  .text-gradient-gold {
+    background: linear-gradient(135deg, #d4860b, #c9a96e);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .glass-card {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+}
+
+/* ===== 选择框美化 ===== */
+select {
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 0.7rem center;
+  background-size: 1em;
+  padding-right: 2.5rem;
+}
