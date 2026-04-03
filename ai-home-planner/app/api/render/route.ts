@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { put } from "@vercel/blob";
 
 const DECOR8_API_KEY = process.env.DECOR8_API_KEY || "";
+const IMGBB_API_KEY = process.env.IMGBB_API_KEY || "";
 const DECOR8_ENDPOINT = "https://api.decor8.ai/generate_designs_for_room";
 
 const STYLE_MAP: Record<string, string> = {
@@ -38,10 +38,33 @@ const ROOM_MAP: Record<string, string> = {
   bathroom: "bathroom",
 };
 
+async function uploadToImgbb(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const base64 = Buffer.from(buffer).toString("base64");
+
+  const formData = new URLSearchParams();
+  formData.append("key", IMGBB_API_KEY);
+  formData.append("image", base64);
+
+  const res = await fetch("https://api.imgbb.com/1/upload", {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`imgbb上传失败: ${res.status} ${err}`);
+  }
+
+  const data = await res.json();
+  return data.data.url;
+}
+
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
   console.log("[route.ts] 请求到达:", new Date().toISOString());
   console.log("[route.ts] DECOR8_API_KEY:", DECOR8_API_KEY ? "存在" : "未配置");
+  console.log("[route.ts] IMGBB_API_KEY:", IMGBB_API_KEY ? "存在" : "未配置");
 
   try {
     const contentType = request.headers.get("content-type") || "";
@@ -58,7 +81,6 @@ export async function POST(request: NextRequest) {
     const image = formData.get("image") as File | null;
     const style = (formData.get("style") as string) || "scandinavian";
     const roomType = (formData.get("room_type") as string) || "客厅";
-    const planId = (formData.get("plan_id") as string) || "pro";
 
     if (!image || !image.type.startsWith("image/")) {
       return NextResponse.json({ error: "请上传有效图片" }, { status: 400 });
@@ -67,30 +89,32 @@ export async function POST(request: NextRequest) {
     console.log("[route.ts] 图片:", image.name, image.size, "bytes");
 
     if (!DECOR8_API_KEY) {
-      return NextResponse.json({ rendered_image_url: "", _error: "DECOR8_API_KEY 未设置" });
+      return NextResponse.json({ rendered_image_url: "", _error: "DECOR8_API_KEY未设置" });
+    }
+    if (!IMGBB_API_KEY) {
+      return NextResponse.json({ rendered_image_url: "", _error: "IMGBB_API_KEY未设置" });
     }
 
-    // 步骤1：上传图片到 Vercel Blob 获取公开URL
-    console.log("[route.ts] 上传图片到 Vercel Blob...");
+    // 步骤1：上传图片到 imgbb 获取公开URL
+    console.log("[route.ts] 上传图片到imgbb...");
     let publicImageUrl: string;
     try {
-      const blob = await put(`room_${Date.now()}.jpg`, image, { access: "public", addRandomSuffix: true });
-      publicImageUrl = blob.url;
-      console.log("[route.ts] Blob上传成功:", publicImageUrl);
-    } catch (blobErr) {
-      console.error("[route.ts] Blob上传失败:", blobErr);
-      return NextResponse.json({ rendered_image_url: "", _error: "图片上传失败，请确认已创建Blob Store" });
+      publicImageUrl = await uploadToImgbb(image);
+      console.log("[route.ts] imgbb上传成功:", publicImageUrl);
+    } catch (err) {
+      console.error("[route.ts] imgbb上传失败:", err);
+      return NextResponse.json({ rendered_image_url: "", _error: String(err) });
     }
 
     // 步骤2：调用 Decor8 AI
-    console.log("[route.ts] 调用 Decor8 API...");
+    console.log("[route.ts] 调用Decor8 API...");
     const requestBody = {
       input_image_url: publicImageUrl,
       room_type: ROOM_MAP[roomType] || "livingroom",
       design_style: STYLE_MAP[style] || "modern",
       num_images: 1,
     };
-    console.log("[route.ts] 请求体:", JSON.stringify({ ...requestBody, input_image_url: "..." }));
+    console.log("[route.ts] 请求体:", JSON.stringify({ ...requestBody, input_image_url: publicImageUrl.substring(0, 50) + "..." }));
 
     const response = await fetch(DECOR8_ENDPOINT, {
       method: "POST",
@@ -108,8 +132,8 @@ export async function POST(request: NextRequest) {
         console.log("[route.ts] 成功! 耗时:", Date.now() - startTime, "ms");
         return NextResponse.json({ rendered_image_url: renderedUrl, design_description: `${roomType}渲染完成` });
       }
-      console.warn("[route.ts] 200但无图片URL:", JSON.stringify(data).substring(0, 300));
-      return NextResponse.json({ rendered_image_url: "", _error: "API返回成功但无图片URL", _raw: JSON.stringify(data).substring(0, 300) });
+      console.warn("[route.ts] 200但无图片:", JSON.stringify(data).substring(0, 500));
+      return NextResponse.json({ rendered_image_url: "", _error: "无图片URL", _raw: JSON.stringify(data).substring(0, 300) });
     }
 
     const errorText = await response.text().catch(() => "");
